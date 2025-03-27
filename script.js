@@ -1,29 +1,69 @@
 function sendMessage() {
-    let userInput = document.getElementById("user-input").value;
+    let userInput = document.getElementById("user-input").value.trim();
     let chatBox = document.getElementById("chat-box");
 
-    if (userInput.trim() === "") return;
+    if (!userInput) return;
 
+    // Display user message
     displayMessage(chatBox, userInput, "user-message");
     document.getElementById("user-input").value = "";
 
-    // Extract departure, destination, and date from user input
+    // // Show loading indicator
+    // const loadingElement = displayMessage(chatBox, "Thinking...", "bot-message loading");
+
+    // First try to extract flight details
     fetch("/get_response", {
         method: "POST",
         body: JSON.stringify({ message: userInput }),
         headers: { "Content-Type": "application/json" }
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) throw new Error("Failed to analyze message");
+        return response.json();
+    })
     .then(data => {
         if (data.departure && data.destination && data.date) {
-            getAirportCodes(data.departure, data.destination, data.date, chatBox);
+            // If flight details found, proceed with flight search
+            return getAirportCodes(data.departure, data.destination, data.date, chatBox)
+                .catch(error => {
+                    // If flight search fails, fall back to ChatGPT
+                    return handleNonFlightQuery(userInput, chatBox);
+                });
         } else {
-            displayMessage(chatBox, "I couldn't extract flight details. Please try again.", "bot-message");
+            // If no flight details, use ChatGPT
+            return handleNonFlightQuery(userInput, chatBox);
         }
     })
     .catch(error => {
         console.error("Error:", error);
-        displayMessage(chatBox, "An error occurred while processing your request.", "bot-message");
+        return handleNonFlightQuery(userInput, chatBox);
+    })
+    .finally(() => {
+        // Always remove loading indicator
+        chatBox.removeChild(loadingElement);
+    });
+}
+
+function handleNonFlightQuery(userInput, chatBox) {
+    return fetch("/chat_with_ai", {
+        method: "POST",
+        body: JSON.stringify({ message: userInput }),
+        headers: { "Content-Type": "application/json" }
+    })
+    .then(response => {
+        if (!response.ok) throw new Error("Failed to get AI response");
+        return response.json();
+    })
+    .then(data => {
+        if (data.type === "ai") {
+            displayMessage(chatBox, data.message, "bot-message");
+        } else if (data.error) {
+            displayMessage(chatBox, data.message || "Sorry, I couldn't process that.", "bot-message");
+        }
+    })
+    .catch(error => {
+        console.error("AI Error:", error);
+        displayMessage(chatBox, "I'm having trouble responding. Please try again.", "bot-message");
     });
 }
 
